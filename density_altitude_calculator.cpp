@@ -163,12 +163,13 @@ void print_json(const DensityAltitudeData& da) {
 
 void print_usage(const char* program_name) {
     std::cerr << "Usage: " << program_name 
-              << " <pressure_alt_ft> <oat_celsius> <ias_kts> <tas_kts>\n\n";
+              << " <pressure_alt_ft> <oat_celsius> <ias_kts> <tas_kts> [force_exception]\n\n";
     std::cerr << "Arguments:\n";
     std::cerr << "  pressure_alt_ft : Pressure altitude (feet)\n";
     std::cerr << "  oat_celsius     : Outside air temperature (°C)\n";
     std::cerr << "  ias_kts        : Indicated airspeed (knots)\n";
-    std::cerr << "  tas_kts        : True airspeed (knots)\n\n";
+    std::cerr << "  tas_kts        : True airspeed (knots)\n";
+    std::cerr << "  force_exception : Optional, 1 to trigger exception (default: 0)\n\n";
     std::cerr << "Example:\n";
     std::cerr << "  " << program_name << " 5000 25 150 170\n";
     std::cerr << "  (5000 ft PA, 25°C OAT, 150 kts IAS, 170 kts TAS)\n";
@@ -179,7 +180,7 @@ int main(int argc, char* argv[]) {
     
     const std::vector<std::string_view> args(argv + 1, argv + argc);
     
-    if (args.size() != 4) {
+    if (args.size() != 4 && args.size() != 5) {
         print_usage(argv[0]);
         return 1;
     }
@@ -189,6 +190,17 @@ int main(int argc, char* argv[]) {
         double oat_celsius = parse_double(args[1]);
         double ias_kts = parse_double(args[2]);
         double tas_kts = parse_double(args[3]);
+        
+        // Check for force exception flag
+        bool force_exception = false;
+        if (args.size() == 5) {
+            force_exception = (args[4] == "1" || args[4] == "true");
+        }
+        
+        // Simulate exception for ISA deviation field not found
+        if (force_exception) {
+            throw std::runtime_error("CRITICAL: Required dataref 'sim/weather/isa_deviation' not found in X-Plane API");
+        }
         
         // Validate inputs
         if (pressure_altitude_ft < -2000 || pressure_altitude_ft > 60000) {

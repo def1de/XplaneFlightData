@@ -18,6 +18,7 @@
 #include <sstream>
 #include <numbers>
 #include <string_view>
+#include <memory>
 
 namespace xplane_mfd::calc {
 
@@ -52,6 +53,34 @@ double normalize_angle(double angle) {
     return angle;
 }
 
+// ========================================================================
+// REMOVE BEFORE FLIGHT - Recursion
+// ========================================================================
+/**
+ * Recursive binomial coefficient calculation (n choose k)
+ * Used for calculating combinations of alternate airports in flight planning
+ * 
+ * Formula: C(n,k) = "n choose k" = number of ways to select k items from n items
+ * Recursive relation: C(n,k) = C(n-1,k-1) + C(n-1,k)
+ * 
+ * @param n Total number of items
+ * @param k Number of items to choose
+ * @return Number of combinations
+ * 
+ * Example: binomial_coefficient(5, 2) = 10
+ *          (5 nearby airports, choose 2 as alternates = 10 possible combinations)
+ */
+[[nodiscard]] unsigned long long binomial_coefficient(unsigned int n, unsigned int k) {
+    // Base cases
+    if (k > n) return 0;           // Can't choose more than available
+    if (k == 0 || k == n) return 1; // C(n,0) = C(n,n) = 1
+    if (k == 1) return n;           // C(n,1) = n
+    
+    // Recursive relation: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    // This represents: either include current item or don't
+    return binomial_coefficient(n - 1, k - 1) + binomial_coefficient(n - 1, k);
+}
+
 /**
  * 1. Real-time wind vector calculation
  * Builds wind from ground track and airspeed vectors
@@ -64,7 +93,13 @@ struct WindData {
     double gust_factor;
 };
 
-[[nodiscard]] WindData calculate_wind_vector(double tas_kts, double gs_kts, double heading_deg, double track_deg) {
+[[nodiscard]] WindData calculate_wind_vector(
+    double tas_kts,
+    double gs_kts,
+    double heading_deg,
+    double track_deg,
+    const std::vector<double>& ias_history // Past airspeeds for gust calc
+) {
     WindData result;
     
     // Convert to radians
@@ -97,8 +132,32 @@ struct WindData {
     result.headwind = -result.speed_kts * std::cos(rel_wind_rad);
     result.crosswind = result.speed_kts * std::sin(rel_wind_rad);
     
-    // Gust factor (simplified - would need IAS history for real calc)
-    result.gust_factor = 0.0;  // Placeholder - needs time series
+    // ========================================================================
+    // REMOVE BEFORE FLIGHT - Memory allocation
+    // ========================================================================
+    if (!ias_history.empty()) {
+        auto history_buffer = std::make_unique<double[]>(ias_history.size());
+
+        // Copy data into our dynamic buffer for analysis
+        for (size_t i = 0; i < ias_history.size(); ++i) {
+            history_buffer[i] = ias_history[i];
+        }
+
+        // Perform some analysis (e.g., find max and average speed)
+        double max_ias = 0;
+        double sum_ias = 0;
+        for (size_t i = 0; i < ias_history.size(); ++i) {
+            if (history_buffer[i] > max_ias) max_ias = history_buffer[i];
+            sum_ias += history_buffer[i];
+        }
+        double avg_ias = sum_ias / ias_history.size();
+
+        // The gust factor is the difference between the peak and average speed
+        result.gust_factor = max_ias - avg_ias;
+        
+    } else {
+        result.gust_factor = 0.0;
+    }
     
     return result;
 }
@@ -310,6 +369,14 @@ void print_json_results(
     std::cout << "    \"range_with_wind_nm\": " << glide.max_range_with_wind_nm << ",\n";
     std::cout << "    \"glide_ratio\": " << glide.glide_ratio << ",\n";
     std::cout << "    \"best_glide_speed_kts\": " << glide.best_glide_speed_kts << "\n";
+    std::cout << "  },\n";
+    
+    // Recursive function demonstration: Alternate airport combinations
+    // Shows how many ways to select alternate airports from nearby options
+    std::cout << "  \"alternate_airports\": {\n";
+    std::cout << "    \"combinations_5_choose_2\": " << binomial_coefficient(5, 2) << ",\n";
+    std::cout << "    \"combinations_10_choose_3\": " << binomial_coefficient(10, 3) << ",\n";
+    std::cout << "    \"note\": \"Recursive binomial calculation for flight planning\"\n";
     std::cout << "  }\n";
     
     std::cout << "}\n";
@@ -346,8 +413,12 @@ int main(int argc, char* argv[]) {
         double vne_kts = parse_double(args[12]);
         double mmo = parse_double(args[13]);
         
-        // 1. Calculate wind vector
-        WindData wind = calculate_wind_vector(tas_kts, gs_kts, heading, track);
+        // Create a sample history of airspeeds to pass to the calculator.
+        // In a real system, this would come from a sensor data buffer.
+        std::vector<double> ias_history = {145.5, 148.0, 151.2, 149.5, 155.8, 152.1};
+        
+        // 1. Calculate wind vector (with the MODIFIED call)
+        WindData wind = calculate_wind_vector(tas_kts, gs_kts, heading, track, ias_history);
         
         // 2. Calculate envelope margins
         EnvelopeMargins envelope = calculate_envelope(

@@ -12,6 +12,18 @@ To run:
     python3 aircraft_mfd.py
 Or simply:
     ./run_mfd.sh
+
+Keyboard Shortcuts:
+    0 - Show all panels (default view)
+    1 - Show POSITION panel only (full screen)
+    2 - Show WIND panel only (full screen)
+    3 - Show ENVELOPE panel only (full screen)
+    4 - Show NAVIGATION panel only (full screen)
+    5 - Show FLIGHT DATA panel only (full screen)
+    6 - Show ENGINE panel only (full screen)
+    7 - Show TURN PERF panel only (full screen)
+    8 - Show VNAV panel only (full screen)
+    9 - Show DENSITY ALT panel only (full screen)
 """
 
 import tkinter as tk
@@ -104,6 +116,24 @@ class AircraftMFD:
         self.is_connected = False
         self.fields_created = False  # Track if data fields have been created
         
+        # Display mode: 0 = all panels, 1-9 = individual panel full screen
+        self.display_mode = 0
+        self.panel_map = {
+            1: "POSITION",
+            2: "WIND", 
+            3: "ENVELOPE",
+            4: "NAVIGATION",
+            5: "FLIGHT DATA",
+            6: "ENGINE",
+            7: "TURN PERF",
+            8: "VNAV",
+            9: "DENSITY ALT"
+        }
+        
+        # Error handling
+        self.has_cpp_error = False
+        self.cpp_error_message = ""
+        
         # Load B612 Mono font
         self.load_custom_fonts()
         
@@ -117,6 +147,7 @@ class AircraftMFD:
         self.init_data_variables()
         
         self.setup_ui()
+        self.setup_keyboard_bindings()
         self.update_display()
     
     def load_custom_fonts(self):
@@ -221,39 +252,55 @@ class AircraftMFD:
         ).pack(pady=8)
         
         # Main display area
-        main_frame = tk.Frame(self.root, bg=self.BG_COLOR)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.main_frame = tk.Frame(self.root, bg=self.BG_COLOR)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Left column - Position & Navigation
-        left_frame = tk.Frame(main_frame, bg=self.BG_COLOR)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=3)
+        self.left_frame = tk.Frame(self.main_frame, bg=self.BG_COLOR)
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=3)
         
-        self.position_frame = self.create_section(left_frame, "POSITION")
-        self.wind_frame = self.create_section(left_frame, "WIND")
-        self.envelope_frame = self.create_section(left_frame, "ENVELOPE")
+        self.position_section, self.position_frame = self.create_section(self.left_frame, "POSITION")
+        self.wind_section, self.wind_frame = self.create_section(self.left_frame, "WIND")
+        self.envelope_section, self.envelope_frame = self.create_section(self.left_frame, "ENVELOPE")
         
         # Middle column - Flight Data & Engine
-        middle_frame = tk.Frame(main_frame, bg=self.BG_COLOR)
-        middle_frame.grid(row=0, column=1, sticky="nsew", padx=3)
+        self.middle_frame = tk.Frame(self.main_frame, bg=self.BG_COLOR)
+        self.middle_frame.grid(row=0, column=1, sticky="nsew", padx=3)
         
-        self.nav_frame = self.create_section(middle_frame, "NAVIGATION")
-        self.flight_frame = self.create_section(middle_frame, "FLIGHT DATA")
-        self.engine_frame = self.create_section(middle_frame, "ENGINE")
+        self.nav_section, self.nav_frame = self.create_section(self.middle_frame, "NAVIGATION")
+        self.flight_section, self.flight_frame = self.create_section(self.middle_frame, "FLIGHT DATA")
+        self.engine_section, self.engine_frame = self.create_section(self.middle_frame, "ENGINE")
         
         # Right column - Performance calculations
-        right_frame = tk.Frame(main_frame, bg=self.BG_COLOR)
-        right_frame.grid(row=0, column=2, sticky="nsew", padx=3)
+        self.right_frame = tk.Frame(self.main_frame, bg=self.BG_COLOR)
+        self.right_frame.grid(row=0, column=2, sticky="nsew", padx=3)
         
-        self.turn_frame = self.create_section(right_frame, "TURN PERF")
-        self.vnav_frame = self.create_section(right_frame, "VNAV")
-        self.density_frame = self.create_section(right_frame, "DENSITY ALT")
+        self.turn_section, self.turn_frame = self.create_section(self.right_frame, "TURN PERF")
+        self.vnav_section, self.vnav_frame = self.create_section(self.right_frame, "VNAV")
+        self.density_section, self.density_frame = self.create_section(self.right_frame, "DENSITY ALT")
         
-        main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=1)
-        main_frame.grid_columnconfigure(2, weight=1)
+        # Map sections for easy access by panel number
+        self.sections = {
+            1: self.position_section,
+            2: self.wind_section,
+            3: self.envelope_section,
+            4: self.nav_section,
+            5: self.flight_section,
+            6: self.engine_section,
+            7: self.turn_section,
+            8: self.vnav_section,
+            9: self.density_section
+        }
+        
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(1, weight=1)
+        self.main_frame.grid_columnconfigure(2, weight=1)
         
         # Create data field rows (only once!)
         self.create_data_fields()
+        
+        # Error overlay (hidden by default)
+        self.create_error_overlay()
         
         # Bottom status bar
         self.status_bar = tk.Frame(self.root, bg=self.DIM_COLOR, height=30)
@@ -269,6 +316,16 @@ class AircraftMFD:
         )
         self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
         
+        # Keyboard hint
+        self.keyboard_hint = tk.Label(
+            self.status_bar,
+            text="[0-9] Switch Panel | [0] All Panels",
+            font=self.small_font,
+            bg=self.DIM_COLOR,
+            fg=self.SECONDARY_COLOR
+        )
+        self.keyboard_hint.pack(side=tk.LEFT, padx=20, pady=5)
+        
         self.time_label = tk.Label(
             self.status_bar,
             text="",
@@ -278,8 +335,75 @@ class AircraftMFD:
         )
         self.time_label.pack(side=tk.RIGHT, padx=10, pady=5)
     
-    def create_section(self, parent, title: str) -> tk.Frame:
-        """Create a labeled section frame"""
+    def create_error_overlay(self):
+        """Create error overlay with big red X (hidden by default)"""
+        self.error_overlay = tk.Frame(
+            self.root, 
+            bg="#000000",
+            bd=0
+        )
+        
+        # Canvas for drawing the red X
+        self.error_canvas = tk.Canvas(
+            self.error_overlay,
+            bg="#000000",
+            highlightthickness=0,
+            width=800,
+            height=700
+        )
+        self.error_canvas.pack(expand=True, fill=tk.BOTH)
+        
+        # Draw big red X
+        x_color = self.WARNING_COLOR
+        line_width = 20
+        
+        # Diagonal lines forming X
+        self.error_canvas.create_line(100, 100, 700, 600, fill=x_color, width=line_width)
+        self.error_canvas.create_line(700, 100, 100, 600, fill=x_color, width=line_width)
+        
+        # Error message
+        self.error_text = tk.Label(
+            self.error_overlay,
+            text="",
+            font=tkfont.Font(family=self.font_family, size=16, weight="bold"),
+            bg="#000000",
+            fg=self.WARNING_COLOR,
+            wraplength=700,
+            justify=tk.CENTER
+        )
+        self.error_text.pack(pady=20)
+        
+        # Instructions
+        self.error_instruction = tk.Label(
+            self.error_overlay,
+            text="Press [0] to return to normal view",
+            font=self.label_font,
+            bg="#000000",
+            fg=self.ALERT_COLOR
+        )
+        self.error_instruction.pack(pady=10)
+        
+        # Hide by default
+        self.error_overlay.place_forget()
+    
+    def show_error_overlay(self, error_message: str):
+        """Show error overlay with message"""
+        self.has_cpp_error = True
+        self.cpp_error_message = error_message
+        self.error_text.config(text=f"C++ CALCULATION ERROR:\n\n{error_message}")
+        
+        # Place overlay on top of everything
+        self.error_overlay.place(x=0, y=40, relwidth=1, relheight=1)
+        self.error_overlay.lift()
+    
+    def hide_error_overlay(self):
+        """Hide error overlay"""
+        self.has_cpp_error = False
+        self.cpp_error_message = ""
+        self.error_overlay.place_forget()
+    
+    def create_section(self, parent, title: str) -> tuple:
+        """Create a labeled section frame - returns (section_frame, content_frame)"""
         section = tk.Frame(parent, bg=self.BG_COLOR, relief=tk.RIDGE, bd=2, highlightbackground=self.DIM_COLOR)
         section.pack(fill=tk.BOTH, expand=True, pady=5)
         
@@ -297,7 +421,7 @@ class AircraftMFD:
         content = tk.Frame(section, bg=self.BG_COLOR)
         content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        return content
+        return section, content
     
     def add_data_row(self, parent, label: str, value_var: tk.StringVar) -> None:
         """Add a data row to a section"""
@@ -322,6 +446,91 @@ class AircraftMFD:
             fg=self.PRIMARY_COLOR,
             anchor=tk.E
         ).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+    
+    def setup_keyboard_bindings(self):
+        """Setup keyboard shortcuts for display mode switching"""
+        # Bind number keys 0-9
+        for i in range(10):
+            self.root.bind(str(i), lambda event, num=i: self.switch_display_mode(num))
+    
+    def switch_display_mode(self, mode: int):
+        """Switch between multi-panel and single-panel views"""
+        if mode < 0 or mode > 9:
+            return
+        
+        # Clear error overlay when switching away from mode 9
+        if self.display_mode == 9 and mode != 9:
+            self.hide_error_overlay()
+        
+        self.display_mode = mode
+        
+        if mode == 0:
+            # Show all panels in 3-column layout
+            self.show_all_panels()
+        else:
+            # Show single panel in full screen
+            self.show_single_panel(mode)
+        
+        # Update status bar to show current mode
+        if mode == 0:
+            self.root.title("X-PLANE MFD - ALL PANELS")
+            self.keyboard_hint.config(text="[0-9] Switch Panel | [0] All Panels")
+        else:
+            panel_name = self.panel_map.get(mode, "UNKNOWN")
+            self.root.title(f"X-PLANE MFD - {panel_name}")
+            self.keyboard_hint.config(text=f"[{mode}] {panel_name} | [0] Return to All")
+    
+    def show_all_panels(self):
+        """Show all panels in 3-column layout"""
+        # Show all column frames
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=3)
+        self.middle_frame.grid(row=0, column=1, sticky="nsew", padx=3)
+        self.right_frame.grid(row=0, column=2, sticky="nsew", padx=3)
+        
+        # Make all sections visible
+        for section in self.sections.values():
+            section.pack(fill=tk.BOTH, expand=True, pady=5)
+    
+    def show_single_panel(self, panel_num: int):
+        """Show single panel in full screen"""
+        # Hide all column frames first
+        self.left_frame.grid_remove()
+        self.middle_frame.grid_remove()
+        self.right_frame.grid_remove()
+        
+        # Get the selected section
+        selected_section = self.sections.get(panel_num)
+        if not selected_section:
+            return
+        
+        # Determine which column frame contains this section
+        if panel_num in [1, 2, 3]:
+            # Position, Wind, Envelope - left column
+            self.left_frame.grid(row=0, column=0, sticky="nsew", padx=3, columnspan=3)
+            # Hide other sections in left column
+            for i in [1, 2, 3]:
+                if i == panel_num:
+                    self.sections[i].pack(fill=tk.BOTH, expand=True, pady=5)
+                else:
+                    self.sections[i].pack_forget()
+        elif panel_num in [4, 5, 6]:
+            # Navigation, Flight Data, Engine - middle column
+            self.middle_frame.grid(row=0, column=0, sticky="nsew", padx=3, columnspan=3)
+            # Hide other sections in middle column
+            for i in [4, 5, 6]:
+                if i == panel_num:
+                    self.sections[i].pack(fill=tk.BOTH, expand=True, pady=5)
+                else:
+                    self.sections[i].pack_forget()
+        elif panel_num in [7, 8, 9]:
+            # Turn Perf, VNAV, Density Alt - right column
+            self.right_frame.grid(row=0, column=0, sticky="nsew", padx=3, columnspan=3)
+            # Hide other sections in right column
+            for i in [7, 8, 9]:
+                if i == panel_num:
+                    self.sections[i].pack(fill=tk.BOTH, expand=True, pady=5)
+                else:
+                    self.sections[i].pack_forget()
     
     def format_lat_lon(self, degrees: float, is_latitude: bool) -> str:
         """Format latitude/longitude for display"""
@@ -422,7 +631,12 @@ class AircraftMFD:
             return None
     
     def calculate_density_altitude(self, pressure_alt_ft, oat_celsius, ias_kts, tas_kts) -> Optional[dict]:
-        """Call C++ density altitude calculator"""
+        """Call C++ density altitude calculator
+        
+        When display_mode == 9 (viewing DENSITY ALT panel in full screen),
+        this will force the C++ code to throw an exception, demonstrating
+        error handling. A big red X will appear on screen.
+        """
         try:
             script_dir = Path(__file__).parent
             calculator_path = script_dir / "density_altitude_calculator"
@@ -430,9 +644,14 @@ class AircraftMFD:
             if not calculator_path.exists():
                 return None
             
+            # Force exception when viewing density alt panel in full screen (mode 9)
+            # This demonstrates C++ exception handling and error display
+            force_exception = "1" if self.display_mode == 9 else "0"
+            
             result = subprocess.run(
                 [str(calculator_path), 
-                 str(pressure_alt_ft), str(oat_celsius), str(ias_kts), str(tas_kts)],
+                 str(pressure_alt_ft), str(oat_celsius), str(ias_kts), str(tas_kts),
+                 force_exception],
                 capture_output=True,
                 text=True,
                 timeout=0.1
@@ -440,8 +659,26 @@ class AircraftMFD:
             
             if result.returncode == 0:
                 return json.loads(result.stdout)
-            return None
-        except:
+            else:
+                # Exception occurred in C++ code
+                if self.display_mode == 9 and result.returncode != 0 and not self.has_cpp_error:
+                    # Only show error once (not on every update loop)
+                    # Extract error message from stderr
+                    error_lines = result.stderr.strip().split('\n')
+                    # Get the actual error message (first line after "Error:")
+                    error_msg = "Unknown C++ error"
+                    for line in error_lines:
+                        if line.startswith("Error:"):
+                            error_msg = line.replace("Error:", "").strip()
+                            break
+                    
+                    # Show error overlay
+                    self.show_error_overlay(error_msg)
+                
+                return None
+        except Exception as e:
+            if self.display_mode == 9 and not self.has_cpp_error:
+                self.show_error_overlay(f"Failed to execute calculator: {str(e)}")
             return None
     
     def update_display(self):
