@@ -5,6 +5,7 @@ X-Plane MFD (Multi-Function Display) - Real-time aircraft data visualization
 Requirements:
 - Python 3.7+
 - requests library (install with: pip install requests)
+- pygame library (install with: pip install pygame)
 - X-Plane 12.1.1+ running with Web API enabled
 
 To run:
@@ -13,7 +14,13 @@ To run:
 Or simply:
     ./run_mfd.sh
 
-Keyboard Shortcuts:
+USB Device Support:
+    Supports ThrustMaster F16 MFD 2 (VID: 0x044f, PID: 0xb352)
+    - Automatically detected when connected
+    - Falls back to keyboard input if not connected
+    - Buttons 0-9 on device map to panel selection
+
+Keyboard Shortcuts (fallback when USB device not connected):
     0 - Show all panels (default view)
     1 - Show POSITION panel only (full screen)
     2 - Show WIND panel only (full screen)
@@ -35,6 +42,7 @@ import time
 import os
 from pathlib import Path
 import subprocess
+import pygame
 
 
 class XPlaneAPI:
@@ -94,6 +102,112 @@ class XPlaneAPI:
         return None
 
 
+class USBDeviceManager:
+    """Manager for F16 MFD 2 USB device input"""
+    
+    # F16 MFD 2 device identifiers
+    TARGET_VENDOR_ID = 0x044f  # ThrustMaster, Inc.
+    TARGET_PRODUCT_ID = 0xb352  # F16 MFD 2
+    
+    def __init__(self, button_callback):
+        """Initialize USB device manager
+        
+        Args:
+            button_callback: Function to call when a button is pressed, receives button_number (0-9)
+        """
+        self.button_callback = button_callback
+        self.joystick = None
+        self.device_connected = False
+        self.last_button_states = {}
+        
+        # Initialize pygame for joystick support
+        try:
+            pygame.init()
+            pygame.joystick.init()
+            self.detect_device()
+        except Exception as e:
+            print(f"Failed to initialize pygame: {e}")
+    
+    def detect_device(self):
+        """Detect and initialize the F16 MFD 2 device"""
+        try:
+            joystick_count = pygame.joystick.get_count()
+            
+            for i in range(joystick_count):
+                joy = pygame.joystick.Joystick(i)
+                
+                # Get device IDs - pygame doesn't expose vendor/product IDs directly,
+                # so we'll match by name as a fallback
+                device_name = joy.get_name().lower()
+                
+                # Check if this looks like the F16 MFD device
+                if "f16" in device_name or "mfd" in device_name or "thrustmaster" in device_name.lower():
+                    joy.init()
+                    self.joystick = joy
+                    self.device_connected = True
+                    print(f"✓ F16 MFD 2 detected: {joy.get_name()}")
+                    print(f"  - Buttons: {joy.get_numbuttons()}")
+                    print(f"  - Axes: {joy.get_numaxes()}")
+                    print(f"  - Hats: {joy.get_numhats()}")
+                    
+                    # Initialize button states
+                    for btn in range(joy.get_numbuttons()):
+                        self.last_button_states[btn] = False
+                    
+                    return True
+            
+            print("F16 MFD 2 not detected - using keyboard fallback")
+            return False
+            
+        except Exception as e:
+            print(f"Error detecting USB device: {e}")
+            return False
+    
+    def poll_buttons_once(self):
+        """Poll for button presses once (called from main thread)
+        
+        Returns True if device is still connected, False otherwise
+        """
+        if not self.device_connected:
+            return False
+        
+        try:
+            # Process pygame events to update joystick state
+            # This MUST be called from the main thread on macOS
+            pygame.event.pump()
+            
+            # Check each button
+            for btn_idx in range(self.joystick.get_numbuttons()):
+                button_pressed = self.joystick.get_button(btn_idx)
+                
+                # Detect button press (transition from not pressed to pressed)
+                if button_pressed and not self.last_button_states.get(btn_idx, False):
+                    # Map button index to panel number (0-9)
+                    # You may need to adjust this mapping based on your device
+                    if btn_idx <= 9:
+                        self.button_callback(btn_idx)
+                
+                self.last_button_states[btn_idx] = button_pressed
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error polling USB device: {e}")
+            self.device_connected = False
+            return False
+    
+    def is_connected(self):
+        """Check if the F16 MFD 2 is connected"""
+        return self.device_connected
+    
+    def cleanup(self):
+        """Clean up resources"""
+        if self.joystick:
+            self.joystick.quit()
+        pygame.joystick.quit()
+        pygame.quit()
+
+
 class AircraftMFD:
     """Multi-Function Display for X-Plane aircraft data"""
     
@@ -134,6 +248,9 @@ class AircraftMFD:
         self.has_cpp_error = False
         self.cpp_error_message = ""
         
+        # Initialize USB device manager for F16 MFD 2
+        self.usb_device = USBDeviceManager(self.on_usb_button_press)
+        
         # Load B612 Mono font
         self.load_custom_fonts()
         
@@ -159,6 +276,11 @@ class AircraftMFD:
         
         self.setup_ui()
         self.setup_keyboard_bindings()
+        
+        # Bind cleanup on window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Start main update loop (includes USB polling)
         self.update_display()
     
     def load_custom_fonts(self):
@@ -327,10 +449,11 @@ class AircraftMFD:
         )
         self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
         
-        # Keyboard hint
+        # Keyboard hint - update based on USB device status
+        input_method = "F16 MFD" if self.usb_device.is_connected() else "KEYBOARD"
         self.keyboard_hint = tk.Label(
             self.status_bar,
-            text="[0-9] Switch Panel | [0] All Panels",
+            text=f"INPUT: {input_method} | [0-9] Switch Panel | [0] All Panels",
             font=self.small_font,
             bg=self.DIM_COLOR,
             fg=self.SECONDARY_COLOR
@@ -473,6 +596,22 @@ class AircraftMFD:
         for i in range(10):
             self.root.bind(str(i), lambda event, num=i: self.switch_display_mode(num))
     
+    def on_usb_button_press(self, button_number: int):
+        """Callback for USB device button presses
+        
+        Args:
+            button_number: Button index from USB device (0-9)
+        """
+        # Use root.after to ensure GUI updates happen in main thread
+        self.root.after(0, lambda: self.switch_display_mode(button_number))
+    
+    def on_closing(self):
+        """Handle window close event"""
+        print("Shutting down...")
+        if hasattr(self, 'usb_device'):
+            self.usb_device.cleanup()
+        self.root.destroy()
+    
     def update_font_sizes(self, use_large_fonts: bool):
         """Update all label fonts based on display mode"""
         if use_large_fonts:
@@ -519,13 +658,14 @@ class AircraftMFD:
             self.update_font_sizes(use_large_fonts=True)
         
         # Update status bar to show current mode
+        input_method = "F16 MFD" if self.usb_device.is_connected() else "KEYBOARD"
         if mode == 0:
             self.root.title("X-PLANE MFD - ALL PANELS")
-            self.keyboard_hint.config(text="[0-9] Switch Panel | [0] All Panels")
+            self.keyboard_hint.config(text=f"INPUT: {input_method} | [0-9] Switch Panel | [0] All Panels")
         else:
             panel_name = self.panel_map.get(mode, "UNKNOWN")
             self.root.title(f"X-PLANE MFD - {panel_name}")
-            self.keyboard_hint.config(text=f"[{mode}] {panel_name} | [0] Return to All")
+            self.keyboard_hint.config(text=f"INPUT: {input_method} | [{mode}] {panel_name} | [0] Return to All")
     
     def show_all_panels(self):
         """Show all panels in 3-column layout"""
@@ -733,6 +873,10 @@ class AircraftMFD:
     
     def update_display(self):
         """Main update loop for the MFD"""
+        # Poll USB device buttons (if connected) - MUST be on main thread for macOS
+        if self.usb_device.is_connected():
+            self.usb_device.poll_buttons_once()
+        
         try:
             # Test connection
             response = requests.get(f"{self.api.base_url}/datarefs/count", timeout=1)
