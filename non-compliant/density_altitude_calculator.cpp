@@ -12,7 +12,6 @@
  * 
  * Usage: ./density_altitude_calculator <pressure_alt_ft> <oat_celsius> <ias_kts> <tas_kts>
  */
-
 #include <iostream>
 #include <cmath>
 #include <iomanip>
@@ -185,6 +184,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // ========================================================================
+    // REMOVE BEFORE FLIGHT - Memory allocation
+    // ========================================================================
     try {
         double pressure_altitude_ft = parse_double(args[0]);
         double oat_celsius = parse_double(args[1]);
@@ -197,7 +199,6 @@ int main(int argc, char* argv[]) {
             force_exception = (args[4] == "1" || args[4] == "true");
         }
         
-        // Simulate exception for ISA deviation field not found
         if (force_exception) {
             throw std::runtime_error("CRITICAL: Required dataref 'sim/weather/isa_deviation' not found in X-Plane API");
         }
@@ -225,4 +226,3 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
-

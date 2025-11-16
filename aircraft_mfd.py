@@ -137,11 +137,22 @@ class AircraftMFD:
         # Load B612 Mono font
         self.load_custom_fonts()
         
-        # Setup fonts
+        # Setup fonts - regular size for all-panels view
         self.title_font = tkfont.Font(family=self.font_family, size=14, weight="bold")
         self.data_font = tkfont.Font(family=self.font_family, size=12, weight="bold")
         self.label_font = tkfont.Font(family=self.font_family, size=10)
         self.small_font = tkfont.Font(family=self.font_family, size=8)
+        
+        # Large fonts for single-panel view
+        self.title_font_large = tkfont.Font(family=self.font_family, size=32, weight="bold")
+        self.data_font_large = tkfont.Font(family=self.font_family, size=28, weight="bold")
+        self.label_font_large = tkfont.Font(family=self.font_family, size=22)
+        self.small_font_large = tkfont.Font(family=self.font_family, size=16)
+        
+        # Track all labels for font updates
+        self.header_labels = []
+        self.data_value_labels = []
+        self.data_label_labels = []
         
         # Initialize data variables
         self.init_data_variables()
@@ -348,30 +359,30 @@ class AircraftMFD:
             self.error_overlay,
             bg="#000000",
             highlightthickness=0,
-            width=800,
-            height=700
+            width=600,
+            height=400
         )
         self.error_canvas.pack(expand=True, fill=tk.BOTH)
         
-        # Draw big red X
+        # Draw big red X (scaled for smaller canvas)
         x_color = self.WARNING_COLOR
-        line_width = 20
+        line_width = 15
         
-        # Diagonal lines forming X
-        self.error_canvas.create_line(100, 100, 700, 600, fill=x_color, width=line_width)
-        self.error_canvas.create_line(700, 100, 100, 600, fill=x_color, width=line_width)
+        # Diagonal lines forming X (centered)
+        self.error_canvas.create_line(225, 80, 525, 320, fill=x_color, width=line_width)
+        self.error_canvas.create_line(525, 80, 225, 320, fill=x_color, width=line_width)
         
         # Error message
         self.error_text = tk.Label(
             self.error_overlay,
             text="",
-            font=tkfont.Font(family=self.font_family, size=16, weight="bold"),
+            font=tkfont.Font(family=self.font_family, size=14, weight="bold"),
             bg="#000000",
             fg=self.WARNING_COLOR,
-            wraplength=700,
+            wraplength=550,
             justify=tk.CENTER
         )
-        self.error_text.pack(pady=20)
+        self.error_text.pack(pady=15)
         
         # Instructions
         self.error_instruction = tk.Label(
@@ -381,7 +392,7 @@ class AircraftMFD:
             bg="#000000",
             fg=self.ALERT_COLOR
         )
-        self.error_instruction.pack(pady=10)
+        self.error_instruction.pack(pady=8)
         
         # Hide by default
         self.error_overlay.place_forget()
@@ -417,6 +428,9 @@ class AircraftMFD:
         )
         header.pack(pady=5)
         
+        # Store reference for font updates
+        self.header_labels.append(header)
+        
         # Content frame
         content = tk.Frame(section, bg=self.BG_COLOR)
         content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -428,7 +442,7 @@ class AircraftMFD:
         row = tk.Frame(parent, bg=self.BG_COLOR)
         row.pack(fill=tk.X, pady=2)
         
-        tk.Label(
+        label_widget = tk.Label(
             row,
             text=label,
             font=self.label_font,
@@ -436,22 +450,51 @@ class AircraftMFD:
             fg=self.DIM_COLOR,
             width=12,
             anchor=tk.W
-        ).pack(side=tk.LEFT)
+        )
+        label_widget.pack(side=tk.LEFT)
         
-        tk.Label(
+        value_widget = tk.Label(
             row,
             textvariable=value_var,
             font=self.data_font,
             bg=self.BG_COLOR,
             fg=self.PRIMARY_COLOR,
             anchor=tk.E
-        ).pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        )
+        value_widget.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        
+        # Store references for font updates
+        self.data_label_labels.append(label_widget)
+        self.data_value_labels.append(value_widget)
     
     def setup_keyboard_bindings(self):
         """Setup keyboard shortcuts for display mode switching"""
         # Bind number keys 0-9
         for i in range(10):
             self.root.bind(str(i), lambda event, num=i: self.switch_display_mode(num))
+    
+    def update_font_sizes(self, use_large_fonts: bool):
+        """Update all label fonts based on display mode"""
+        if use_large_fonts:
+            # Use large fonts for single-panel view
+            label_font = self.label_font_large
+            data_font = self.data_font_large
+        else:
+            # Use regular fonts for all-panels view
+            label_font = self.label_font
+            data_font = self.data_font
+        
+        # Update all header labels (section titles)
+        for header in self.header_labels:
+            header.config(font=label_font)
+        
+        # Update all data label labels (field names like "LATITUDE:")
+        for label in self.data_label_labels:
+            label.config(font=label_font)
+        
+        # Update all data value labels (actual values)
+        for value_label in self.data_value_labels:
+            value_label.config(font=data_font)
     
     def switch_display_mode(self, mode: int):
         """Switch between multi-panel and single-panel views"""
@@ -467,9 +510,13 @@ class AircraftMFD:
         if mode == 0:
             # Show all panels in 3-column layout
             self.show_all_panels()
+            # Use regular font sizes
+            self.update_font_sizes(use_large_fonts=False)
         else:
             # Show single panel in full screen
             self.show_single_panel(mode)
+            # Use large font sizes
+            self.update_font_sizes(use_large_fonts=True)
         
         # Update status bar to show current mode
         if mode == 0:
@@ -482,12 +529,13 @@ class AircraftMFD:
     
     def show_all_panels(self):
         """Show all panels in 3-column layout"""
-        # Show all column frames
-        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=3)
-        self.middle_frame.grid(row=0, column=1, sticky="nsew", padx=3)
-        self.right_frame.grid(row=0, column=2, sticky="nsew", padx=3)
+        # Restore original grid configuration for all column frames
+        # Important: reset columnspan to 1 (default) to restore 3-column layout
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=3, columnspan=1)
+        self.middle_frame.grid(row=0, column=1, sticky="nsew", padx=3, columnspan=1)
+        self.right_frame.grid(row=0, column=2, sticky="nsew", padx=3, columnspan=1)
         
-        # Make all sections visible
+        # Make all sections visible in their original containers
         for section in self.sections.values():
             section.pack(fill=tk.BOTH, expand=True, pady=5)
     
@@ -660,9 +708,11 @@ class AircraftMFD:
             if result.returncode == 0:
                 return json.loads(result.stdout)
             else:
-                # Exception occurred in C++ code
-                if self.display_mode == 9 and result.returncode != 0 and not self.has_cpp_error:
-                    # Only show error once (not on every update loop)
+                # Check if this is an actual exception (return code 1) vs graceful error handling (return code 3)
+                # Return code 1 = uncaught exception (non-compliant version)
+                # Return code 3 = gracefully handled error (compliant version)
+                if self.display_mode == 9 and result.returncode == 1 and not self.has_cpp_error:
+                    # Only show big X for actual exceptions (non-compliant behavior)
                     # Extract error message from stderr
                     error_lines = result.stderr.strip().split('\n')
                     # Get the actual error message (first line after "Error:")
@@ -672,7 +722,7 @@ class AircraftMFD:
                             error_msg = line.replace("Error:", "").strip()
                             break
                     
-                    # Show error overlay
+                    # Show error overlay for uncaught exceptions only
                     self.show_error_overlay(error_msg)
                 
                 return None

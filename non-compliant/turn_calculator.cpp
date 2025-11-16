@@ -12,7 +12,6 @@
  * 
  * Usage: ./turn_calculator <tas_kts> <bank_deg> <course_change_deg>
  */
-
 #include <iostream>
 #include <cmath>
 #include <iomanip>
@@ -174,4 +173,3 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 }
-
