@@ -157,6 +157,8 @@ def test_calculator(filename, arguments, expected_output):
         print("❌ JSON mismatch:")
         for err in errors:
             print(f" - {err}")
+        print("Json:")
+        print(output_data)
         exit(1)
     else:
         print("✅ Output matches expected data")
