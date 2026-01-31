@@ -95,33 +95,34 @@ Float64 normalize_angle(Float64 angle) {
     return result;
 }
 
-// JSF-COMPLIANT: Iterative binomial coefficient calculation (n choose k)
-// AV Rule 119: No recursion allowed
-// AV Rule 113: Single exit point
-// Uses iterative formula to avoid overflow: C(n,k) = ∏(i=1 to k) (n-k+i)/i
-Uint64 binomial_coefficient(Uint32 n, Uint32 k) {
-    Uint64 result = 0;  // Single exit point variable
+// ========================================================================
+// REMOVE BEFORE FLIGHT - Recursion
+// ========================================================================
+/**
+ * Recursive binomial coefficient calculation (n choose k)
+ * Used for calculating combinations of alternate airports in flight planning
+ * 
+ * Formula: C(n,k) = "n choose k" = number of ways to select k items from n items
+ * Recursive relation: C(n,k) = C(n-1,k-1) + C(n-1,k)
+ * 
+ * @param n Total number of items
+ * @param k Number of items to choose
+ * @return Number of combinations
+ * 
+ * Formuala (non-recursive): C(n,k) = n/1 x (n-1)/2 x (n-2)/3 x ... x (n-k+1)/k
+ * 
+ * Example: binomial_coefficient(5, 2) = 10
+ *          (5 nearby airports, choose 2 as alternates = 10 possible combinations)
+ */
+[[nodiscard]] unsigned long long binomial_coefficient(unsigned int n, unsigned int k) {
+    // Base cases
+    if (k > n) return 0;           // Can't choose more than available
+    if (k == 0 || k == n) return 1; // C(n,0) = C(n,n) = 1
+    if (k == 1) return n;           // C(n,1) = n
     
-    if (k > n) {
-        result = 0;
-    } else if (k == 0 || k == n) {
-        result = 1;
-    } else if (k == 1) {
-        result = n;
-    } else {
-        // Optimize: C(n,k) = C(n, n-k), use smaller k
-        if (k > n - k) {
-            k = n - k;
-        }
-        
-        // Iterative calculation to avoid overflow
-        result = 1;
-        for (Uint32 i = 1; i <= k; ++i) {
-            result = result * (n - k + i) / i;
-        }
-    }
-    
-    return result;  // Single exit point
+    // Recursive relation: C(n,k) = C(n-1,k-1) + C(n-1,k)
+    // This represents: either include current item or don't
+    return binomial_coefficient(n - 1, k - 1) + binomial_coefficient(n - 1, k);
 }
 
 // 1. Wind vector calculation
@@ -138,9 +139,9 @@ WindData calculate_wind_vector(
     Float64 tas_kts,
     Float64 gs_kts,
     Float64 heading_deg,
-    Float64 track_deg,
-    const Float64* ias_history,
-    Int32 history_size
+    Float64 track_deg,const std::vector<double>& ias_history // Past airspeeds for gust calc
+    //const Float64* ias_history,
+    //Int32 history_size
 ) {
     WindData result;
     
@@ -177,18 +178,29 @@ WindData calculate_wind_vector(
     result.headwind = -result.speed_kts * cos(wind_from_rad);
     result.crosswind = result.speed_kts * sin(wind_from_rad);
     
-    // Gust factor from IAS variance
-    if (history_size >= min_history_for_stats) {
-        Float64 sum = 0.0;
-        Float64 sum_sq = 0.0;
-        for (Int32 i = 0; i < history_size; ++i) {
-            sum += ias_history[i];
-            sum_sq += ias_history[i] * ias_history[i];
+    // ========================================================================
+    // REMOVE BEFORE FLIGHT - Memory allocation
+    // ========================================================================
+    if (!ias_history.empty()) {
+        auto history_buffer = std::make_unique<double[]>(ias_history.size());
+
+        // Copy data into our dynamic buffer for analysis
+        for (size_t i = 0; i < ias_history.size(); ++i) {
+            history_buffer[i] = ias_history[i];
         }
-        Float64 mean = sum / history_size;
-        Float64 variance = (sum_sq / history_size) - (mean * mean);
-        Float64 std_dev = sqrt(variance);
+
+        double max_ias = 0;
+        double sum_ias = 0;
+        double sum_ias_sq = 0;
+        for (size_t i = 0; i < ias_history.size(); ++i) {
+            sum_ias += history_buffer[i];
+            sum_ias_sq += history_buffer[i] * history_buffer[i];
+        }
+        double mean = sum_ias / ias_history.size();
+        double variance = (sum_ias_sq / ias_history.size()) - mean * mean;
+        double std_dev = sqrt(variance);
         result.gust_factor = std_dev / mean;
+        
     } else {
         result.gust_factor = 0.0;
     }
@@ -439,17 +451,23 @@ int main(int argc, char* argv[]) {
             // 1. Pre-allocate the buffer at initialization (on the stack).
             // This happens ONCE. No memory is allocated inside any loops.
             SensorHistoryBuffer ias_buffer;
+            std::vector<double> ias_history(30);
 
             for (Int32 i = 0; i < 30; ++i) {
                 Float64 new_reading = 150.0 + (i % 7) - 3.0;
                 
                 ias_buffer.add_reading(new_reading);
+                ias_history[i] = new_reading;
             }
-            
-            WindData wind = calculate_wind_vector(
-                tas_kts, gs_kts, heading, track,
-                ias_buffer.get_data_ptr(), ias_buffer.get_size()
-            );
+
+            // ========================================================================
+            // REMOVE BEFORE FLIGHT - Memory allocation, switch function call
+            // ========================================================================
+            WindData wind = calculate_wind_vector(tas_kts, gs_kts, heading, track, ias_history);
+            // WindData wind = calculate_wind_vector(
+            //     tas_kts, gs_kts, heading, track,
+            //     ias_buffer.get_data_ptr(), ias_buffer.get_size()
+            // );
             
             // 2. Calculate envelope margins
             EnvelopeMargins envelope = calculate_envelope(

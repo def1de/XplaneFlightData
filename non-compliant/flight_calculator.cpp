@@ -63,6 +63,8 @@ double normalize_angle(double angle) {
  * Formula: C(n,k) = "n choose k" = number of ways to select k items from n items
  * Recursive relation: C(n,k) = C(n-1,k-1) + C(n-1,k)
  * 
+ * 
+ * 
  * @param n Total number of items
  * @param k Number of items to choose
  * @return Number of combinations
