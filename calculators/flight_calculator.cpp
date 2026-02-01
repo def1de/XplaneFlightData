@@ -142,6 +142,7 @@ WindData calculate_wind_vector(
     Float64 gs_kts,
     Float64 heading_deg,
     Float64 track_deg,const std::vector<double>& ias_history // Past airspeeds for gust calc
+    // hint:
     //const Float64* ias_history,
     //Int32 history_size
 ) {
