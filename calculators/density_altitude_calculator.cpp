@@ -228,23 +228,27 @@ int main(int argc, char* argv[]) {
         }
         
         if (force_exception) {
-            return error_simulated;
+            std::cerr << "CRITICAL: Required dataref 'sim/weather/isa_deviation' not found in X-Plane API\n";
+            return_code = error_simulated;
         }
         
         // Validate inputs
         if (pressure_altitude_ft < -2000 || pressure_altitude_ft > 60000) {
-            return error_invalid_args;
+            std::cerr << "Warning: Pressure altitude outside typical range\n";
+            return_code = error_invalid_args;
         }
         
         if (oat_celsius < -60 || oat_celsius > 60) {
-            return error_invalid_args;
+            std::cerr << "Warning: Temperature outside typical range\n";
+            return_code = error_invalid_args;
         }
         
-        DensityAltitudeData da = calculate_density_altitude_data(
-            pressure_altitude_ft, oat_celsius, ias_kts, tas_kts
-        );
+        if(return_code==error_success){
+            DensityAltitudeData da = calculate_density_altitude_data(
+                pressure_altitude_ft, oat_celsius, ias_kts, tas_kts
+            );
+            print_json(da);
+        }
         
-        print_json(da);
-        
-        return error_success;
+        return return_code;
 }
